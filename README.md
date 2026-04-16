@@ -158,6 +158,7 @@ vm:
 
 [![Build status]( https://img.shields.io/github/actions/workflow/status/roots/trellis-cli/ci.yml?branch=master&style=flat-square)](https://github.com/roots/trellis-cli/actions)
 ![GitHub release](https://img.shields.io/github/release/roots/trellis-cli?style=flat-square)
+![GitHub downloads](https://img.shields.io/github/downloads/roots/trellis-cli/total?label=github%20downloads&style=flat-square)
 [![Follow Roots](https://img.shields.io/badge/follow%20@rootswp-1da1f2?logo=twitter&logoColor=ffffff&message=&style=flat-square)](https://twitter.com/rootswp)
 [![Sponsor Roots](https://img.shields.io/badge/sponsor%20roots-525ddc?logo=github&style=flat-square&logoColor=ffffff&message=)](https://github.com/sponsors/roots)
 
@@ -173,7 +174,7 @@ Roots is an independent open source org, supported only by developers like you. 
 
 ### Sponsors
 
-<a href="https://carrot.com/"><img src="https://cdn.roots.io/app/uploads/carrot.svg" alt="Carrot" width="120" height="90"></a> <a href="https://wordpress.com/"><img src="https://cdn.roots.io/app/uploads/wordpress.svg" alt="WordPress.com" width="120" height="90"></a> <a href="https://www.itineris.co.uk/"><img src="https://cdn.roots.io/app/uploads/itineris.svg" alt="Itineris" width="120" height="90"></a> <a href="https://kinsta.com/?kaid=OFDHAJIXUDIV"><img src="https://cdn.roots.io/app/uploads/kinsta.svg" alt="Kinsta" width="120" height="90"></a>
+<a href="https://carrot.com/"><img src="https://cdn.roots.io/app/uploads/carrot.svg" alt="Carrot" height="90"></a> <a href="https://wordpress.com/"><img src="https://cdn.roots.io/app/uploads/wordpress.svg" alt="WordPress.com" height="90"></a> <a href="https://www.itineris.co.uk/"><img src="https://cdn.roots.io/app/uploads/itineris.svg" alt="Itineris" height="90"></a> <a href="https://kinsta.com/?kaid=OFDHAJIXUDIV"><img src="https://cdn.roots.io/app/uploads/kinsta.svg" alt="Kinsta" height="90"></a>
 
 ## Quick Install (macOS and Linux via Homebrew)
 
@@ -240,33 +241,27 @@ setup after downloading the Windows build:
 trellis-cli artifacts can be [cryptographically verified via GitHub CLI](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli).
 
 ```console
-# The archive with both predicates
 $ gh attestation verify --repo roots/trellis-cli /path/to/trellis_Darwin_arm64.tar.gz
-## ...snipped...
+
+Loaded digest sha256:xxxxxxx for file://path/to/trellis_Darwin_arm64.tar.gz
+Loaded 1 attestation from GitHub API
+
+The following policy criteria will be enforced:
+- Predicate type must match:................ https://slsa.dev/provenance/v1
+- Source Repository Owner URI must match:... https://github.com/roots
+- Source Repository URI must match:......... https://github.com/roots/trellis-cli
+- Subject Alternative Name must match regex: (?i)^https://github.com/roots/trellis-cli/
+- OIDC Issuer must match:................... https://token.actions.githubusercontent.com
+
 ✓ Verification succeeded!
 
-sha256:xxx was attested by:
-REPO                   PREDICATE_TYPE                  WORKFLOW
-roots/trellis-cli  https://slsa.dev/provenance/v1  .github/workflows/release.yml@refs/tags/v9.8.7
-roots/trellis-cli  https://spdx.dev/Document/v2.3  .github/workflows/release.yml@refs/tags/v9.8.7
+The following 1 attestation matched the policy criteria
 
-# The binary
-$ gh attestation verify --repo roots/trellis-cli /path/to/trellis
-## ...snipped...
-✓ Verification succeeded!
-
-sha256:xxx was attested by:
-REPO                   PREDICATE_TYPE                  WORKFLOW
-roots/trellis-cli  https://slsa.dev/provenance/v1  .github/workflows/release.yml@refs/tags/v9.8.7
-
-# The SBOM
-$ gh attestation verify --repo roots/trellis-cli /path/to/trellis_Darwin_arm64.tar.gz.sbom.json
-## ...snipped...
-✓ Verification succeeded!
-
-sha256:xxx was attested by:
-REPO                   PREDICATE_TYPE                  WORKFLOW
-roots/trellis-cli  https://slsa.dev/provenance/v1  .github/workflows/release.yml@refs/tags/v9.8.7
+- Attestation #1
+  - Build repo:..... roots/trellis-cli
+  - Build workflow:. .github/workflows/release.yml@refs/tags/v0.0.1
+  - Signer repo:.... roots/trellis-cli
+  - Signer workflow: .github/workflows/release.yml@refs/tags/v0.0.1
 ```
 
 ## Shell Integration
@@ -465,4 +460,3 @@ Keep track of development and community news.
 - Follow [@rootswp on Twitter](https://twitter.com/rootswp)
 - Follow the [Roots Blog](https://roots.io/blog/)
 - Subscribe to the [Roots Newsletter](https://roots.io/subscribe/)
-
