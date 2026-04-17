@@ -1,22 +1,81 @@
-# trellis-cli (WSL2 Fork)
+# trellis-cli (Windows/WSL2)
 
-> **This is a fork of [roots/trellis-cli](https://github.com/roots/trellis-cli)** that adds native **WSL2 virtual machine support for Windows**. The upstream CLI supports Lima (macOS/Linux). This fork adds a `wsl` backend that manages WSL2 distros via `wsl.exe`, giving Windows developers a first-class Trellis development experience.
+A community-maintained fork of [roots/trellis-cli](https://github.com/roots/trellis-cli) that adds native **WSL2 virtual machine support for Windows**.
 
 [![Upstream](https://img.shields.io/badge/upstream-roots%2Ftrellis--cli-blue?style=flat-square)](https://github.com/roots/trellis-cli)
+[![Latest Release](https://img.shields.io/github/v/release/qwatts-dev/trellis-cli?style=flat-square&label=latest%20release)](https://github.com/qwatts-dev/trellis-cli/releases/latest)
+
+## About This Fork
+
+When Trellis [dropped Vagrant support](https://roots.io/trellis-drops-vagrant-support-in-favor-of-lima-vms/) in v1.15.0, Windows developers lost their local development path. The upstream CLI now uses [Lima](https://lima-vm.io/) (macOS/Linux only) for `trellis vm` commands. This fork adds a `wsl` backend that manages WSL2 distros via `wsl.exe`, giving Windows developers a first-class Trellis development experience.
+
+This work was [proposed upstream](https://github.com/roots/trellis-cli/pull/667) and reviewed by the Roots team. They decided the approach didn't fit the project's architectural direction — a fair call. I maintain this fork for my team and share it publicly for any Windows Trellis users who need it.
+
+**Maintained by:** [@qwatts-dev](https://github.com/qwatts-dev) — one developer, used daily in production with my team. If you run into issues, please [open an issue](https://github.com/qwatts-dev/trellis-cli/issues). Bug reports and feedback help improve this for everyone.
 
 ---
 
-## What's New: WSL2 VM Backend
+## Install
+
+1. Download `trellis.exe` and `trellis-linux` from the [latest release](https://github.com/qwatts-dev/trellis-cli/releases/latest).
+
+2. Place both files in a folder, e.g., `C:\trellis-wsl\`.
+
+3. Add that folder to your Windows PATH so you can run `trellis` from any terminal:
+
+   ```powershell
+   # Run this once in PowerShell (no admin required):
+   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+   [Environment]::SetEnvironmentVariable("Path", $userPath + ";C:\trellis-wsl", "User")
+   ```
+
+   Then **restart your terminal**. You should now be able to run:
+
+   ```powershell
+   trellis --version
+   ```
+
+> **Already have the official trellis-cli installed?** If you installed the upstream version via Scoop, Homebrew, or another method, either uninstall it first or invoke this fork by its full path (e.g., `C:\trellis-wsl\trellis.exe vm start`) to avoid conflicts. Windows uses whichever `trellis.exe` appears first in PATH.
+
+Both files are required:
+- **`trellis.exe`** — runs on Windows, manages WSL distros
+- **`trellis-linux`** — cross-compiled Linux binary, automatically deployed into each WSL distro during bootstrap
+
+### Updating
+
+Download the latest `trellis.exe` and `trellis-linux` from [releases](https://github.com/qwatts-dev/trellis-cli/releases/latest) and replace the files in your install folder (e.g., `C:\trellis-wsl\`). Existing WSL distros will pick up the new Linux binary on next `vm start`.
+
+### Uninstalling
+
+1. Delete your WSL distros first (if desired):
+   ```powershell
+   trellis vm delete    # run from each project directory
+   ```
+
+2. Delete the install folder:
+   ```powershell
+   Remove-Item -Recurse -Force C:\trellis-wsl
+   ```
+
+3. Remove it from your PATH:
+   ```powershell
+   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+   [Environment]::SetEnvironmentVariable("Path", ($userPath -split ";" | Where-Object { $_ -ne "C:\trellis-wsl" }) -join ";", "User")
+   ```
+
+4. Restart your terminal.
+
+## WSL2 VM Backend
 
 ### Overview
 
-Windows developers can now run `trellis vm start` to get a fully provisioned Trellis development environment powered by WSL2. Each project gets its own isolated Ubuntu distro with nginx, PHP-FPM, MariaDB, and all Trellis services — no manual WSL setup required.
+Windows developers can run `trellis vm start` to get a fully provisioned Trellis development environment powered by WSL2. Each project gets its own isolated Ubuntu distro with nginx, PHP-FPM, MariaDB, and all Trellis services — no manual WSL setup required.
 
 ### Requirements
 
-- **Windows 11** with WSL2 enabled
-- **VS Code** with the [WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) (required for editing project files)
-- **trellis-cli** (this fork)
+- **Windows 11** with WSL2 enabled (`wsl --install` if not already)
+- **VS Code** with the [WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl)
+- **This fork** (`trellis.exe` + `trellis-linux` from [releases](https://github.com/qwatts-dev/trellis-cli/releases/latest))
 
 > **Important:** Project files live on WSL2's native ext4 filesystem for performance. You must use an editor that supports WSL remote development. VS Code with the WSL extension is the recommended (and automated) path. JetBrains IDEs also support WSL remoting but are not automated by `vm open`.
 
@@ -148,9 +207,9 @@ vm:
 
 ---
 
-## Upstream README
+## Upstream Documentation
 
-*Everything below is from the original [roots/trellis-cli](https://github.com/roots/trellis-cli).*
+*Everything below is from the upstream [roots/trellis-cli](https://github.com/roots/trellis-cli). All upstream commands and configuration options apply to this fork as well.*
 
 ---
 
