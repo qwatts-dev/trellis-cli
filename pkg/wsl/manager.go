@@ -691,6 +691,16 @@ func (m *Manager) BootstrapInstance(name string) error {
 		m.ui.Warn("Could not determine Windows username from environment. SSH keys will not be copied automatically.")
 	}
 
+	// Read Git config from Windows host to automatically configure Git in WSL.
+	// This prevents "Please tell me who you are" errors on first git commit.
+	var gitUserName, gitUserEmail string
+	if nameOutput, err := exec.Command("git", "config", "--global", "user.name").Output(); err == nil {
+		gitUserName = strings.TrimSpace(string(nameOutput))
+	}
+	if emailOutput, err := exec.Command("git", "config", "--global", "user.email").Output(); err == nil {
+		gitUserEmail = strings.TrimSpace(string(emailOutput))
+	}
+
 	// Run apt-get update + install in a single shell command to minimize
 	// the number of wsl.exe invocations. Then install Ansible via pip using
 	// Trellis's requirements.txt. We read from the DrvFS source since the
@@ -772,6 +782,16 @@ else
 	mkdir -p /home/admin/.ssh
 	chmod 700 /home/admin/.ssh
 	chown admin:admin /home/admin/.ssh
+fi
+
+# Configure Git identity from Windows host settings
+if [ -n "GIT_USER_NAME_PLACEHOLDER" ]; then
+	echo "Configuring Git user.name: GIT_USER_NAME_PLACEHOLDER"
+	sudo -u admin git config --global user.name "GIT_USER_NAME_PLACEHOLDER"
+fi
+if [ -n "GIT_USER_EMAIL_PLACEHOLDER" ]; then
+	echo "Configuring Git user.email: GIT_USER_EMAIL_PLACEHOLDER"
+	sudo -u admin git config --global user.email "GIT_USER_EMAIL_PLACEHOLDER"
 fi
 `
 
@@ -875,6 +895,21 @@ fi
 		bootstrapScript = strings.ReplaceAll(bootstrapScript, "WIN_USERNAME_PLACEHOLDER", "")
 	} else {
 		bootstrapScript = strings.ReplaceAll(bootstrapScript, "WIN_USERNAME_PLACEHOLDER", windowsUser)
+	}
+
+	// Inject Git configuration from Windows host
+	if gitUserName != "" {
+		m.ui.Info(fmt.Sprintf("Configuring Git user.name: %s", gitUserName))
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "GIT_USER_NAME_PLACEHOLDER", gitUserName)
+	} else {
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "GIT_USER_NAME_PLACEHOLDER", "")
+	}
+	
+	if gitUserEmail != "" {
+		m.ui.Info(fmt.Sprintf("Configuring Git user.email: %s", gitUserEmail))
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "GIT_USER_EMAIL_PLACEHOLDER", gitUserEmail)
+	} else {
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "GIT_USER_EMAIL_PLACEHOLDER", "")
 	}
 
 	err := command.WithOptions(
