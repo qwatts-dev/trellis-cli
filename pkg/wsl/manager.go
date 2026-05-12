@@ -678,6 +678,28 @@ func (m *Manager) BootstrapInstance(name string) error {
 	wslProjectRoot := toWslPath(projectRoot)
 	wslProjectDest := "/home/admin/" + projectName
 
+	// Read Git config from Windows host to automatically configure Git in WSL.
+	// This prevents "Please tell me who you are" errors on first git commit.
+	var gitUserName, gitUserEmail string
+	if nameOutput, err := exec.Command("git", "config", "--global", "user.name").Output(); err == nil {
+		gitUserName = strings.TrimSpace(string(nameOutput))
+	}
+	if emailOutput, err := exec.Command("git", "config", "--global", "user.email").Output(); err == nil {
+		gitUserEmail = strings.TrimSpace(string(emailOutput))
+    
+	// Get Windows username from Go (more reliable than from within WSL).
+	var windowsUser string
+	
+	// Method: USERNAME environment variable (standard on Windows)
+	windowsUser = os.Getenv("USERNAME")
+	if windowsUser != "" {
+		m.ui.Info(fmt.Sprintf("Found username from USERNAME env: %s", windowsUser))
+	}
+	
+	if windowsUser == "" {
+		m.ui.Warn("Could not determine Windows username from environment. SSH keys will not be copied automatically.")
+	}
+
 	// Run apt-get update + install in a single shell command to minimize
 	// the number of wsl.exe invocations. Then install Ansible via pip using
 	// Trellis's requirements.txt. We read from the DrvFS source since the
@@ -738,10 +760,38 @@ default=admin
 options = "metadata,umask=0022"
 WSLCONF
 
-# Create .ssh directory for admin user (needed by Ansible known_hosts module).
-mkdir -p /home/admin/.ssh
-chmod 700 /home/admin/.ssh
-chown admin:admin /home/admin/.ssh
+# Configure Git identity from Windows host settings
+if [ -n "GIT_USER_NAME_PLACEHOLDER" ]; then
+	echo "Configuring Git user.name: GIT_USER_NAME_PLACEHOLDER"
+	sudo -u admin git config --global user.name "GIT_USER_NAME_PLACEHOLDER"
+fi
+
+if [ -n "GIT_USER_EMAIL_PLACEHOLDER" ]; then
+	echo "Configuring Git user.email: GIT_USER_EMAIL_PLACEHOLDER"
+	sudo -u admin git config --global user.email "GIT_USER_EMAIL_PLACEHOLDER"
+  
+# Disable systemd rate limiting for PHP-FPM to prevent installation failures.
+# When multiple PHP extensions are installed, each triggers a php-fpm restart.
+# Without this, systemd's default rate limit (5 starts per 10s) causes failures
+# with "Start request repeated too quickly" during first provision.
+mkdir -p /etc/systemd/system/php8.3-fpm.service.d
+cat > /etc/systemd/system/php8.3-fpm.service.d/override.conf << 'SYSTEMD_OVERRIDE'
+[Unit]
+StartLimitIntervalSec=0
+SYSTEMD_OVERRIDE
+
+# Symlink Windows .ssh directory to admin user (shares SSH keys automatically)
+if [ -d "/mnt/c/Users/WIN_USERNAME_PLACEHOLDER/.ssh" ]; then
+	echo "Symlinking /home/admin/.ssh -> /mnt/c/Users/WIN_USERNAME_PLACEHOLDER/.ssh"
+	ln -s "/mnt/c/Users/WIN_USERNAME_PLACEHOLDER/.ssh" /home/admin/.ssh
+	chown -h admin:admin /home/admin/.ssh
+else
+	# No Windows .ssh - create empty directory for Ansible known_hosts module
+	echo "No Windows .ssh directory - creating empty /home/admin/.ssh"
+	mkdir -p /home/admin/.ssh
+	chmod 700 /home/admin/.ssh
+	chown admin:admin /home/admin/.ssh
+fi
 `
 
 	// Copy the ENTIRE project (trellis/ + site/ + .git/) from Windows into
@@ -833,6 +883,32 @@ chown admin:admin /home/admin/.ssh
 			"grep -q '/srv/www/%s/current' /etc/fstab || echo '%s/%s /srv/www/%s/current none bind,nofail 0 0' >> /etc/fstab\n",
 			siteName, wslProjectDest, siteDirName, siteName,
 		)
+	}
+
+	// Inject Git configuration from Windows host
+	if gitUserName != "" {
+		m.ui.Info(fmt.Sprintf("Configuring Git user.name: %s", gitUserName))
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "GIT_USER_NAME_PLACEHOLDER", gitUserName)
+	} else {
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "GIT_USER_NAME_PLACEHOLDER", "")
+	}
+	
+	if gitUserEmail != "" {
+		m.ui.Info(fmt.Sprintf("Configuring Git user.email: %s", gitUserEmail))
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "GIT_USER_EMAIL_PLACEHOLDER", gitUserEmail)
+	} else {
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "GIT_USER_EMAIL_PLACEHOLDER", "")
+  }
+    
+	// Inject the Windows username directly into all placeholder locations in the script.
+	// This avoids bash variable scoping issues.
+	m.ui.Info(fmt.Sprintf("Injecting username '%s' into %d placeholder locations", windowsUser, strings.Count(bootstrapScript, "WIN_USERNAME_PLACEHOLDER")))
+	
+	if windowsUser == "" {
+		// If no username, replace with empty to skip SSH key copy
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "WIN_USERNAME_PLACEHOLDER", "")
+	} else {
+		bootstrapScript = strings.ReplaceAll(bootstrapScript, "WIN_USERNAME_PLACEHOLDER", windowsUser)
 	}
 
 	err := command.WithOptions(
