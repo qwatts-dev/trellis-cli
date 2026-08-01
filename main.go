@@ -8,6 +8,7 @@ import (
 	"github.com/roots/trellis-cli/app_paths"
 	"github.com/roots/trellis-cli/cmd"
 	"github.com/roots/trellis-cli/github"
+	"github.com/roots/trellis-cli/pkg/wsl"
 	"github.com/roots/trellis-cli/plugin"
 	"github.com/roots/trellis-cli/trellis"
 	"github.com/roots/trellis-cli/update"
@@ -24,6 +25,7 @@ var deprecatedCommands = []string{
 }
 
 func main() {
+	wsl.HostVersion = version
 	c := cli.NewCLI("trellis", version)
 	c.Args = os.Args[1:]
 

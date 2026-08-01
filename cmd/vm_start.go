@@ -86,6 +86,9 @@ func (c *VmStartCommand) Run(args []string) int {
 			}
 			_ = manager.DeleteInstance(instanceName)
 		} else {
+			if ok {
+				wslManager.EnsureCliVersion(instanceName)
+			}
 			c.printInstanceInfo()
 			return 0
 		}

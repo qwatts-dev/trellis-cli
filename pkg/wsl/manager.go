@@ -1,6 +1,8 @@
 package wsl
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -361,6 +363,116 @@ func (m *Manager) Copy(srcInVm string, dstOnHost string) error {
 	}
 
 	return os.WriteFile(dstOnHost, data, 0644)
+}
+
+// EnsureCliVersion keeps the in-distro trellis binary in sync with the Windows
+// host version. It runs on `vm start` for an already-provisioned distro so the
+// binary tracks host upgrades AND downgrades without a re-bootstrap.
+//
+// Non-fatal: any failure warns and leaves the existing binary in place.
+func (m *Manager) EnsureCliVersion(name string) {
+	distro := distroName(name)
+	if !m.distroExists(distro) {
+		return
+	}
+
+	exePath, _ := os.Executable()
+	sidecar := filepath.Join(filepath.Dir(exePath), "trellis-linux")
+
+	// Dev/fork path: a local trellis-linux sidecar sits next to the exe.
+	// Local builds all report version "canary", so version strings never
+	// differ between rebuilds — compare bytes (sha256) instead.
+	if _, err := os.Stat(sidecar); err == nil {
+		if m.inDistroBinaryMatchesSidecar(distro, sidecar) {
+			return
+		}
+		script := fmt.Sprintf(
+			"cp %s /usr/local/bin/trellis && chmod 755 /usr/local/bin/trellis",
+			toWslPath(sidecar),
+		)
+		if err := command.Cmd("wsl", []string{"-d", distro, "-u", "root", "--", "bash", "-c", script}).Run(); err != nil {
+			m.ui.Warn(fmt.Sprintf("Warning: could not update in-distro trellis binary: %v", err))
+			return
+		}
+		printStatus(m.ui, fmt.Sprintf("%s Synced in-distro trellis (dev build)", color.GreenString("[ok]")))
+		return
+	}
+
+	// Release path: no sidecar. Pin the distro to the host's EXACT version
+	// (up or down) by downloading that release asset.
+	if HostVersion == "canary" {
+		return
+	}
+	if m.inDistroCliVersion(distro) == HostVersion {
+		return
+	}
+	printStatus(m.ui, fmt.Sprintf("Syncing in-distro trellis to %s...", HostVersion))
+	script := fmt.Sprintf(
+		"curl -fsSL %s | tar xz -C /usr/local/bin trellis && chmod 755 /usr/local/bin/trellis",
+		releaseAssetURL(HostVersion),
+	)
+	if err := command.Cmd("wsl", []string{"-d", distro, "-u", "root", "--", "bash", "-c", script}).Run(); err != nil {
+		m.ui.Warn(fmt.Sprintf("Warning: could not sync in-distro trellis to %s: %v", HostVersion, err))
+		return
+	}
+	printStatus(m.ui, fmt.Sprintf("%s In-distro trellis synced to %s", color.GreenString("[ok]"), HostVersion))
+}
+
+// releaseAssetURL returns the download URL for the linux/amd64 trellis release
+// tarball for the given version (without leading "v").
+func releaseAssetURL(version string) string {
+	return fmt.Sprintf(
+		"https://github.com/qwatts-dev/trellis-cli/releases/download/v%s/trellis_Linux_x86_64.tar.gz",
+		version,
+	)
+}
+
+// inDistroCliVersion returns the version reported by the in-distro trellis
+// binary (first line of `trellis --version`). Empty on any error.
+func (m *Manager) inDistroCliVersion(distro string) string {
+	out, err := command.Cmd("wsl", []string{"-d", distro, "--", "trellis", "--version"}).Output()
+	if err != nil {
+		return ""
+	}
+	// In-distro program output is UTF-8, not wsl.exe's UTF-16LE.
+	version := strings.TrimSpace(string(out))
+	if i := strings.IndexByte(version, '\n'); i >= 0 {
+		version = strings.TrimSpace(version[:i])
+	}
+	return version
+}
+
+// inDistroBinaryMatchesSidecar reports whether /usr/local/bin/trellis inside
+// the distro is byte-identical to the host sidecar.
+func (m *Manager) inDistroBinaryMatchesSidecar(distro string, sidecar string) bool {
+	hostSum, err := fileSHA256(sidecar)
+	if err != nil {
+		return false
+	}
+	out, err := command.Cmd("wsl", []string{"-d", distro, "-u", "root", "--", "sha256sum", "/usr/local/bin/trellis"}).Output()
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return false
+	}
+	return strings.EqualFold(fields[0], hostSum)
+}
+
+// fileSHA256 returns the hex-encoded SHA-256 of a file's contents.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -828,9 +940,9 @@ chown admin:admin /home/admin/.ssh
 	// binary exists next to the running executable, copy it in. This is
 	// used when testing from source before an upstream release exists.
 	//
-	// Priority 2 — Upstream releases: run the official install script
-	// (scripts/get) inside the distro. This downloads the matching
-	// linux/amd64 binary from the latest GitHub release.
+	// Priority 2 — Releases: download the linux/amd64 asset for the host's
+	// EXACT version (so the distro never drifts to "latest"). Falls back to
+	// the install script only for "canary" dev builds with no sidecar.
 	exePath, _ := os.Executable()
 	linuxBinary := filepath.Join(filepath.Dir(exePath), "trellis-linux")
 	if _, err := os.Stat(linuxBinary); err == nil {
@@ -838,6 +950,11 @@ chown admin:admin /home/admin/.ssh
 		bootstrapScript.WriteString(fmt.Sprintf(
 			"cp %s /usr/local/bin/trellis && chmod 755 /usr/local/bin/trellis\n",
 			wslLinuxBinary,
+		))
+	} else if HostVersion != "canary" {
+		bootstrapScript.WriteString(fmt.Sprintf(
+			"curl -fsSL %s | tar xz -C /usr/local/bin trellis && chmod 755 /usr/local/bin/trellis\n",
+			releaseAssetURL(HostVersion),
 		))
 	} else {
 		bootstrapScript.WriteString("curl -sL https://raw.githubusercontent.com/qwatts-dev/trellis-cli/master/scripts/get | bash -s\n")
