@@ -3,10 +3,12 @@ package cmd
 import (
 	"flag"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/hashicorp/cli"
 	"github.com/roots/trellis-cli/pkg/trust"
+	"github.com/roots/trellis-cli/pkg/wsl"
 	"github.com/roots/trellis-cli/trellis"
 )
 
@@ -37,6 +39,10 @@ func (c *VmTrustPathsCommand) Run(args []string) int {
 
 	c.Trellis.CheckVirtualenv(c.UI)
 
+	if windowsHostRequired(c.Trellis, c.UI, "vm trust paths") {
+		return 1
+	}
+
 	if err := c.flags.Parse(args); err != nil {
 		return 1
 	}
@@ -45,6 +51,43 @@ func (c *VmTrustPathsCommand) Run(args []string) int {
 		c.UI.Error(err.Error())
 		c.UI.Output(c.Help())
 		return 1
+	}
+
+	// On Windows the fork trusts certs in the Windows Trusted Root store via
+	// certutil (not pkg/trust), so report from there instead.
+	if runtime.GOOS == "windows" {
+		manager, err := newVmManager(c.Trellis, c.UI)
+		if err != nil {
+			c.UI.Error("Error: " + err.Error())
+			return 1
+		}
+		wslManager, ok := manager.(*wsl.Manager)
+		if !ok {
+			c.UI.Error("'trellis vm trust paths' requires the WSL backend on Windows.")
+			return 1
+		}
+
+		entries := wslManager.TrustPaths(c.site)
+		if len(entries) == 0 {
+			c.UI.Info("No SSL-enabled sites in the development environment.")
+			return 0
+		}
+		for i, e := range entries {
+			if i > 0 {
+				c.UI.Info("")
+			}
+			status := "not trusted (run `trellis vm trust`)"
+			if e.Trusted {
+				status = "trusted (Windows Trusted Root store)"
+			}
+			c.UI.Info(e.Site)
+			c.UI.Info("  cert:   " + e.CertPath)
+			if e.Thumbprint != "" {
+				c.UI.Info("  sha1:   " + e.Thumbprint)
+			}
+			c.UI.Info("  status: " + status)
+		}
+		return 0
 	}
 
 	state, err := trust.Load()

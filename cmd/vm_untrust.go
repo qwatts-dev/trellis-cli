@@ -3,10 +3,12 @@ package cmd
 import (
 	"flag"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/hashicorp/cli"
 	"github.com/roots/trellis-cli/pkg/trust"
+	"github.com/roots/trellis-cli/pkg/wsl"
 	"github.com/roots/trellis-cli/trellis"
 )
 
@@ -37,6 +39,10 @@ func (c *VmUntrustCommand) Run(args []string) int {
 
 	c.Trellis.CheckVirtualenv(c.UI)
 
+	if windowsHostRequired(c.Trellis, c.UI, "vm untrust") {
+		return 1
+	}
+
 	if err := c.flags.Parse(args); err != nil {
 		return 1
 	}
@@ -45,6 +51,33 @@ func (c *VmUntrustCommand) Run(args []string) int {
 		c.UI.Error(err.Error())
 		c.UI.Output(c.Help())
 		return 1
+	}
+
+	// On Windows the fork trusts certs in the Windows Trusted Root store via
+	// certutil (not pkg/trust), so remove them from there instead.
+	if runtime.GOOS == "windows" {
+		manager, err := newVmManager(c.Trellis, c.UI)
+		if err != nil {
+			c.UI.Error("Error: " + err.Error())
+			return 1
+		}
+		wslManager, ok := manager.(*wsl.Manager)
+		if !ok {
+			c.UI.Error("'trellis vm untrust' requires the WSL backend on Windows.")
+			return 1
+		}
+
+		removed, err := wslManager.Untrust(c.site)
+		if err != nil {
+			c.UI.Error("Error untrusting certificates: " + err.Error())
+			return 1
+		}
+		if removed == 0 {
+			c.UI.Info(fmt.Sprintf("nothing to untrust for %s", c.Trellis.Path))
+			return 0
+		}
+		c.UI.Info(fmt.Sprintf("Removed %d certificate(s) from the Windows Trusted Root store.", removed))
+		return 0
 	}
 
 	state, err := trust.Load()
