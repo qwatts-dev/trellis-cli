@@ -16,7 +16,7 @@ package plugin
 import (
 	"os"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -78,21 +78,11 @@ func isExecutable(fullPath string) bool {
 		return false
 	}
 
-	if runtime.GOOS == "windows" {
-		fileExt := strings.ToLower(filepath.Ext(fullPath))
-
-		switch fileExt {
-		case ".bat", ".cmd", ".com", ".exe", ".ps1":
-			return true
-		}
+	if info.IsDir() {
 		return false
 	}
 
-	if m := info.Mode(); !m.IsDir() && m&0111 != 0 {
-		return true
-	}
-
-	return false
+	return isExecutableFile(fullPath, info)
 }
 
 func hasValidPrefix(filepath string, validPrefixes []string) bool {
@@ -109,10 +99,5 @@ func isUnderCoreRootCommands(filepath string, coreRootCommands []string) bool {
 	// the first argument is always one of `validPrefixes` (i.e: "trellis") for a plugin binary
 	rootCommand := strings.Split(filepath, "-")[1]
 
-	for _, v := range coreRootCommands {
-		if v == rootCommand {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(coreRootCommands, rootCommand)
 }

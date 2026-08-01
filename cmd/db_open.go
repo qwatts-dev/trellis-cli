@@ -63,6 +63,13 @@ func (c *DBOpenCommand) Run(args []string) int {
 
 	c.Trellis.CheckVirtualenv(c.UI)
 
+	// `db open` launches a Windows GUI (e.g. TablePlus) and, on the host,
+	// routes the credential-dump into the distro. It must run from Windows,
+	// not inside WSL (where the Windows GUI exe can't exec).
+	if windowsHostRequired(c.Trellis, c.UI, "db open") {
+		return 1
+	}
+
 	if err := c.flags.Parse(args); err != nil {
 		return 1
 	}

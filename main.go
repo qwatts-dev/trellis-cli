@@ -8,6 +8,7 @@ import (
 	"github.com/roots/trellis-cli/app_paths"
 	"github.com/roots/trellis-cli/cmd"
 	"github.com/roots/trellis-cli/github"
+	"github.com/roots/trellis-cli/pkg/wsl"
 	"github.com/roots/trellis-cli/plugin"
 	"github.com/roots/trellis-cli/trellis"
 	"github.com/roots/trellis-cli/update"
@@ -24,6 +25,7 @@ var deprecatedCommands = []string{
 }
 
 func main() {
+	wsl.HostVersion = version
 	c := cli.NewCLI("trellis", version)
 	c.Args = os.Args[1:]
 
@@ -206,11 +208,17 @@ func main() {
 		"vm sync": func() (cli.Command, error) {
 			return cmd.NewVmSyncCommand(ui, trellis), nil
 		},
+		"vm sudoers": func() (cli.Command, error) {
+			return &cmd.VmSudoersCommand{UI: ui, Trellis: trellis}, nil
+		},
 		"vm trust": func() (cli.Command, error) {
 			return cmd.NewVmTrustCommand(ui, trellis), nil
 		},
-		"vm sudoers": func() (cli.Command, error) {
-			return &cmd.VmSudoersCommand{UI: ui, Trellis: trellis}, nil
+		"vm trust paths": func() (cli.Command, error) {
+			return cmd.NewVmTrustPathsCommand(ui, trellis), nil
+		},
+		"vm untrust": func() (cli.Command, error) {
+			return cmd.NewVmUntrustCommand(ui, trellis), nil
 		},
 		"xdebug-tunnel": func() (cli.Command, error) {
 			return &cmd.NamespaceCommand{
@@ -238,7 +246,7 @@ func main() {
 		ui.Info(c.Version)
 
 		if c.Version != "canary" {
-			ui.Info(fmt.Sprintf("https://github.com/roots/trellis-cli/releases/tag/v%s", c.Version))
+			ui.Info(fmt.Sprintf("https://github.com/qwatts-dev/trellis-cli/releases/tag/v%s", c.Version))
 		}
 
 		os.Exit(0)

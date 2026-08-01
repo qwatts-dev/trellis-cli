@@ -1,6 +1,8 @@
 package wsl
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -333,6 +335,146 @@ func (m *Manager) RunCommandPipe(args []string, dir string) (*exec.Cmd, error) {
 	return command.Cmd("wsl", wslArgs), nil
 }
 
+// ReadRootFile reads a root-owned file from inside the distro. Implements
+// vm.Manager for the `vm trust` cert-extraction flow.
+func (m *Manager) ReadRootFile(remotePath string) ([]byte, error) {
+	instanceName, err := m.trellis.GetVmInstanceName()
+	if err != nil {
+		return nil, err
+	}
+
+	distro := distroName(instanceName)
+	if !m.distroExists(distro) {
+		return nil, fmt.Errorf("WSL distro does not exist. Run `trellis vm start` to create it.")
+	}
+
+	// Ensure the distro is running (WSL2 may auto-shutdown idle distros).
+	_ = command.Cmd("wsl", []string{"-d", distro, "--", "/bin/true"}).Run()
+
+	return command.Cmd("wsl", []string{"-d", distro, "-u", "root", "--", "cat", remotePath}).Output()
+}
+
+// Copy writes a file from inside the distro to a path on the Windows host.
+// Implements vm.Manager.
+func (m *Manager) Copy(srcInVm string, dstOnHost string) error {
+	data, err := m.ReadRootFile(srcInVm)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(dstOnHost, data, 0644)
+}
+
+// EnsureCliVersion keeps the in-distro trellis binary in sync with the Windows
+// host version. It runs on `vm start` for an already-provisioned distro so the
+// binary tracks host upgrades AND downgrades without a re-bootstrap.
+//
+// Non-fatal: any failure warns and leaves the existing binary in place.
+func (m *Manager) EnsureCliVersion(name string) {
+	distro := distroName(name)
+	if !m.distroExists(distro) {
+		return
+	}
+
+	exePath, _ := os.Executable()
+	sidecar := filepath.Join(filepath.Dir(exePath), "trellis-linux")
+
+	// Dev/fork path: a local trellis-linux sidecar sits next to the exe.
+	// Local builds all report version "canary", so version strings never
+	// differ between rebuilds — compare bytes (sha256) instead.
+	if _, err := os.Stat(sidecar); err == nil {
+		if m.inDistroBinaryMatchesSidecar(distro, sidecar) {
+			return
+		}
+		script := fmt.Sprintf(
+			"cp %s /usr/local/bin/trellis && chmod 755 /usr/local/bin/trellis",
+			toWslPath(sidecar),
+		)
+		if err := command.Cmd("wsl", []string{"-d", distro, "-u", "root", "--", "bash", "-c", script}).Run(); err != nil {
+			m.ui.Warn(fmt.Sprintf("Warning: could not update in-distro trellis binary: %v", err))
+			return
+		}
+		printStatus(m.ui, fmt.Sprintf("%s Synced in-distro trellis (dev build)", color.GreenString("[ok]")))
+		return
+	}
+
+	// Release path: no sidecar. Pin the distro to the host's EXACT version
+	// (up or down) by downloading that release asset.
+	if HostVersion == "canary" {
+		return
+	}
+	if m.inDistroCliVersion(distro) == HostVersion {
+		return
+	}
+	printStatus(m.ui, fmt.Sprintf("Syncing in-distro trellis to %s...", HostVersion))
+	script := fmt.Sprintf(
+		"curl -fsSL %s | tar xz -C /usr/local/bin trellis && chmod 755 /usr/local/bin/trellis",
+		releaseAssetURL(HostVersion),
+	)
+	if err := command.Cmd("wsl", []string{"-d", distro, "-u", "root", "--", "bash", "-c", script}).Run(); err != nil {
+		m.ui.Warn(fmt.Sprintf("Warning: could not sync in-distro trellis to %s: %v", HostVersion, err))
+		return
+	}
+	printStatus(m.ui, fmt.Sprintf("%s In-distro trellis synced to %s", color.GreenString("[ok]"), HostVersion))
+}
+
+// releaseAssetURL returns the download URL for the linux/amd64 trellis release
+// tarball for the given version (without leading "v").
+func releaseAssetURL(version string) string {
+	return fmt.Sprintf(
+		"https://github.com/qwatts-dev/trellis-cli/releases/download/v%s/trellis_Linux_x86_64.tar.gz",
+		version,
+	)
+}
+
+// inDistroCliVersion returns the version reported by the in-distro trellis
+// binary (first line of `trellis --version`). Empty on any error.
+func (m *Manager) inDistroCliVersion(distro string) string {
+	out, err := command.Cmd("wsl", []string{"-d", distro, "--", "trellis", "--version"}).Output()
+	if err != nil {
+		return ""
+	}
+	// In-distro program output is UTF-8, not wsl.exe's UTF-16LE.
+	version := strings.TrimSpace(string(out))
+	if i := strings.IndexByte(version, '\n'); i >= 0 {
+		version = strings.TrimSpace(version[:i])
+	}
+	return version
+}
+
+// inDistroBinaryMatchesSidecar reports whether /usr/local/bin/trellis inside
+// the distro is byte-identical to the host sidecar.
+func (m *Manager) inDistroBinaryMatchesSidecar(distro string, sidecar string) bool {
+	hostSum, err := fileSHA256(sidecar)
+	if err != nil {
+		return false
+	}
+	out, err := command.Cmd("wsl", []string{"-d", distro, "-u", "root", "--", "sha256sum", "/usr/local/bin/trellis"}).Output()
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return false
+	}
+	return strings.EqualFold(fields[0], hostSum)
+}
+
+// fileSHA256 returns the hex-encoded SHA-256 of a file's contents.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -348,7 +490,7 @@ func (m *Manager) distroExists(distro string) bool {
 	// wsl.exe outputs UTF-16LE on Windows — decode before parsing.
 	decoded := DecodeWslOutput(output)
 
-	for _, line := range strings.Split(decoded, "\n") {
+	for line := range strings.SplitSeq(decoded, "\n") {
 		if strings.TrimSpace(line) == distro {
 			return true
 		}
@@ -366,7 +508,7 @@ func (m *Manager) distroRunning(distro string) bool {
 
 	decoded := DecodeWslOutput(output)
 
-	for _, line := range strings.Split(decoded, "\n") {
+	for line := range strings.SplitSeq(decoded, "\n") {
 		if strings.TrimSpace(line) == distro {
 			return true
 		}
@@ -386,7 +528,7 @@ func (m *Manager) stopOtherDistros(current string) {
 
 	decoded := DecodeWslOutput(output)
 
-	for _, line := range strings.Split(decoded, "\n") {
+	for line := range strings.SplitSeq(decoded, "\n") {
 		name := strings.TrimSpace(line)
 		if name == "" || name == current {
 			continue
@@ -684,7 +826,8 @@ func (m *Manager) BootstrapInstance(name string) error {
 	// ext4 copy hasn't happened yet at this point in the script.
 	wslTrellisSrc := wslProjectRoot + "/trellis"
 
-	bootstrapScript := `set -e
+	var bootstrapScript strings.Builder
+	bootstrapScript.WriteString(`set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # Prevent openssh-server's ssh.socket from starting during install.
@@ -742,7 +885,7 @@ WSLCONF
 mkdir -p /home/admin/.ssh
 chmod 700 /home/admin/.ssh
 chown admin:admin /home/admin/.ssh
-`
+`)
 
 	// Copy the ENTIRE project (trellis/ + site/ + .git/) from Windows into
 	// WSL's native ext4 filesystem. This is the critical step that gives us:
@@ -753,18 +896,18 @@ chown admin:admin /home/admin/.ssh
 	// The copy goes through 9p (slow) but is a ONE-TIME cost during initial
 	// setup. After this, the developer works entirely within the WSL distro
 	// using VS Code's WSL extension.
-	bootstrapScript += fmt.Sprintf(
+	fmt.Fprintf(&bootstrapScript,
 		"echo 'Copying project files to WSL filesystem...'\nmkdir -p %s && rsync -rlpt --chmod=D755,F644 --info=progress2 %s/ %s/\n",
 		wslProjectDest, wslProjectRoot, wslProjectDest,
 	)
-	bootstrapScript += fmt.Sprintf(
+	fmt.Fprintf(&bootstrapScript,
 		"chown -R admin:admin %s\n",
 		wslProjectDest,
 	)
 
 	// Write the Windows project root path inside the distro so that
 	// stopOtherDistros can SyncBack without needing the trellis project loaded.
-	bootstrapScript += fmt.Sprintf(
+	fmt.Fprintf(&bootstrapScript,
 		"echo '%s' > /etc/trellis-project-root\n",
 		projectRoot,
 	)
@@ -773,7 +916,7 @@ chown admin:admin /home/admin/.ssh
 	// DrvFS metadata marks all files executable; Ansible interprets an
 	// executable .vault_pass as a script and tries to run it, which fails
 	// with "Exec format error" since it's a plain text file.
-	bootstrapScript += fmt.Sprintf(
+	fmt.Fprintf(&bootstrapScript,
 		"chmod 644 %s/trellis/.vault_pass 2>/dev/null || true\n",
 		wslProjectDest,
 	)
@@ -781,13 +924,13 @@ chown admin:admin /home/admin/.ssh
 	// Copy vault password file to a secure location inside the distro.
 	// Even though trellis/.vault_pass is now on ext4, Ansible may complain
 	// about permissions depending on the umask. The dedicated copy is safer.
-	bootstrapScript += "mkdir -p /home/admin/.trellis\n"
-	bootstrapScript += fmt.Sprintf(
+	bootstrapScript.WriteString("mkdir -p /home/admin/.trellis\n")
+	fmt.Fprintf(&bootstrapScript,
 		"cp %s/trellis/.vault_pass /home/admin/.trellis/.vault_pass\n",
 		wslProjectDest,
 	)
-	bootstrapScript += "chmod 600 /home/admin/.trellis/.vault_pass\n"
-	bootstrapScript += "chown -R admin:admin /home/admin/.trellis\n"
+	bootstrapScript.WriteString("chmod 600 /home/admin/.trellis/.vault_pass\n")
+	bootstrapScript.WriteString("chown -R admin:admin /home/admin/.trellis\n")
 
 	// Install the trellis CLI binary inside the distro so developers can
 	// run `trellis provision development`, `trellis db open`, etc. from
@@ -797,19 +940,24 @@ chown admin:admin /home/admin/.ssh
 	// binary exists next to the running executable, copy it in. This is
 	// used when testing from source before an upstream release exists.
 	//
-	// Priority 2 — Upstream releases: run the official install script
-	// (scripts/get) inside the distro. This downloads the matching
-	// linux/amd64 binary from the latest GitHub release.
+	// Priority 2 — Releases: download the linux/amd64 asset for the host's
+	// EXACT version (so the distro never drifts to "latest"). Falls back to
+	// the install script only for "canary" dev builds with no sidecar.
 	exePath, _ := os.Executable()
 	linuxBinary := filepath.Join(filepath.Dir(exePath), "trellis-linux")
 	if _, err := os.Stat(linuxBinary); err == nil {
 		wslLinuxBinary := toWslPath(linuxBinary)
-		bootstrapScript += fmt.Sprintf(
+		fmt.Fprintf(&bootstrapScript,
 			"cp %s /usr/local/bin/trellis && chmod 755 /usr/local/bin/trellis\n",
 			wslLinuxBinary,
 		)
+	} else if HostVersion != "canary" {
+		fmt.Fprintf(&bootstrapScript,
+			"curl -fsSL %s | tar xz -C /usr/local/bin trellis && chmod 755 /usr/local/bin/trellis\n",
+			releaseAssetURL(HostVersion),
+		)
 	} else {
-		bootstrapScript += "curl -sL https://raw.githubusercontent.com/roots/trellis-cli/master/scripts/get | bash -s\n"
+		bootstrapScript.WriteString("curl -sL https://raw.githubusercontent.com/qwatts-dev/trellis-cli/master/scripts/get | bash -s\n")
 	}
 
 	// Bind-mount each site's directory from the ext4 project copy to the
@@ -820,16 +968,16 @@ chown admin:admin /home/admin/.ssh
 		// Resolve relative path: trellis/../site → site
 		siteDirName := filepath.Base(filepath.Join("trellis", siteRelPath))
 
-		bootstrapScript += fmt.Sprintf(
+		fmt.Fprintf(&bootstrapScript,
 			"mkdir -p /srv/www/%s/current\n",
 			siteName,
 		)
-		bootstrapScript += fmt.Sprintf(
+		fmt.Fprintf(&bootstrapScript,
 			"mount --bind %s/%s /srv/www/%s/current\n",
 			wslProjectDest, siteDirName, siteName,
 		)
 		// Add fstab entry so the bind mount survives WSL restarts.
-		bootstrapScript += fmt.Sprintf(
+		fmt.Fprintf(&bootstrapScript,
 			"grep -q '/srv/www/%s/current' /etc/fstab || echo '%s/%s /srv/www/%s/current none bind,nofail 0 0' >> /etc/fstab\n",
 			siteName, wslProjectDest, siteDirName, siteName,
 		)
@@ -837,7 +985,7 @@ chown admin:admin /home/admin/.ssh
 
 	err := command.WithOptions(
 		command.WithTermOutput(),
-	).Cmd("wsl", []string{"-d", distro, "--", "bash", "-c", bootstrapScript}).Run()
+	).Cmd("wsl", []string{"-d", distro, "--", "bash", "-c", bootstrapScript.String()}).Run()
 
 	if err != nil {
 		return fmt.Errorf("could not bootstrap WSL distro: %v", err)

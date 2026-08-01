@@ -1,6 +1,7 @@
 # Trellis-CLI WSL2 Fork — Workspace Instructions
 
 ## Project Context
+
 This is a fork of [roots/trellis-cli](https://github.com/roots/trellis-cli) adding a native **WSL2 virtual machine manager** for Windows users. The upstream CLI supports Lima (macOS/Linux). Our fork adds a `wsl` backend that manages WSL2 distros via `wsl.exe`, giving Windows developers a first-class Trellis development experience.
 
 - **Language:** Go (module: `github.com/roots/trellis-cli`)
@@ -10,6 +11,7 @@ This is a fork of [roots/trellis-cli](https://github.com/roots/trellis-cli) addi
 ## Architecture
 
 ### VM Manager Interface (`pkg/vm/vm.go`)
+
 All VM backends implement `vm.Manager`. Our WSL backend lives in `pkg/wsl/`.
 
 ```go
@@ -27,19 +29,19 @@ type Manager interface {
 
 ### Key Files
 
-| File | Purpose |
-|---|---|
-| `pkg/wsl/manager.go` | Core WSL2 Manager — all vm.Manager methods + Bootstrap + Provision + SyncBack + TrustSslCerts + syncConfigFromWSL + DecodeWslOutput + stopOtherDistros + syncBackDistro |
-| `pkg/wsl/hosts.go` | WindowsHostsResolver — manages Windows hosts file with UAC elevation |
-| `pkg/wsl/ubuntu.go` | Ubuntu rootfs URL registry (22.04, 24.04) |
-| `cmd/vm.go` | `newVmManager()` switch — `case "wsl"` + `wslTerminalRequired()` + `windowsHostRequired()` guards |
-| `cmd/vm_open.go` | Opens VS Code in WSL via `--folder-uri vscode-remote://wsl+<distro>/path` |
-| `cmd/vm_sync.go` | Manual WSL→Windows rsync sync |
-| `cmd/vm_trust.go` | Re-imports SSL certs into Windows trust store |
-| `cmd/vm_start.go` | WSL bootstrap/provision flow, unprovisioned cleanup |
-| `cmd/vm_stop.go` | Auto SyncBack before stop |
-| `trellis/trellis.go` | WSL auto-detection in `VmManagerType()`, `ReloadSiteConfigs()`, `CheckVirtualenv` skip |
-| `pkg/db_opener/tableplus.go` | `rundll32.exe` for Windows/WSL URI opening, direct `mysql://` for WSL |
+| File                         | Purpose                                                                                                                                                                 |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pkg/wsl/manager.go`         | Core WSL2 Manager — all vm.Manager methods + Bootstrap + Provision + SyncBack + TrustSslCerts + syncConfigFromWSL + DecodeWslOutput + stopOtherDistros + syncBackDistro |
+| `pkg/wsl/hosts.go`           | WindowsHostsResolver — manages Windows hosts file with UAC elevation                                                                                                    |
+| `pkg/wsl/ubuntu.go`          | Ubuntu rootfs URL registry (22.04, 24.04)                                                                                                                               |
+| `cmd/vm.go`                  | `newVmManager()` switch — `case "wsl"` + `wslTerminalRequired()` + `windowsHostRequired()` guards                                                                       |
+| `cmd/vm_open.go`             | Opens VS Code in WSL via `--folder-uri vscode-remote://wsl+<distro>/path`                                                                                               |
+| `cmd/vm_sync.go`             | Manual WSL→Windows rsync sync                                                                                                                                           |
+| `cmd/vm_trust.go`            | Re-imports SSL certs into Windows trust store                                                                                                                           |
+| `cmd/vm_start.go`            | WSL bootstrap/provision flow, unprovisioned cleanup                                                                                                                     |
+| `cmd/vm_stop.go`             | Auto SyncBack before stop                                                                                                                                               |
+| `trellis/trellis.go`         | WSL auto-detection in `VmManagerType()`, `ReloadSiteConfigs()`, `CheckVirtualenv` skip                                                                                  |
+| `pkg/db_opener/tableplus.go` | `rundll32.exe` for Windows/WSL URI opening, direct `mysql://` for WSL                                                                                                   |
 
 ### How It Works
 
@@ -58,14 +60,15 @@ type Manager interface {
 - **UTF-16LE**: `DecodeWslOutput()` handles wsl.exe UTF-16LE BOM + null-byte pairs
 
 ### WSL2 Command Mapping
-| Method | wsl.exe Command |
-|---|---|
+
+| Method           | wsl.exe Command                              |
+| ---------------- | -------------------------------------------- |
 | `CreateInstance` | `wsl --import <name> <installDir> <tarball>` |
-| `StartInstance` | `wsl --exec sleep infinity` (keepalive) |
-| `StopInstance` | `wsl -t <name>` |
-| `DeleteInstance` | `wsl --unregister <name>` |
-| `OpenShell` | `wsl -d <name> --cd <dir> -- <command>` |
-| `RunCommand` | `wsl -d <name> --cd <dir> -- <args...>` |
+| `StartInstance`  | `wsl --exec sleep infinity` (keepalive)      |
+| `StopInstance`   | `wsl -t <name>`                              |
+| `DeleteInstance` | `wsl --unregister <name>`                    |
+| `OpenShell`      | `wsl -d <name> --cd <dir> -- <command>`      |
+| `RunCommand`     | `wsl -d <name> --cd <dir> -- <args...>`      |
 
 ## Build & Test
 
@@ -82,6 +85,7 @@ path\to\trellis-cli\trellis.exe vm start
 **Important:** Always build BOTH `trellis.exe` (Windows) and `trellis-linux` (cross-compiled for WSL distros). The Linux binary is copied into distros during bootstrap.
 
 ## Coding Conventions
+
 - Follow existing code patterns in `pkg/lima/manager.go` as the reference implementation
 - Use `github.com/roots/trellis-cli/command` package for exec (matches upstream style)
 - Use `github.com/fatih/color` for colored output (matches upstream)
@@ -89,7 +93,39 @@ path\to\trellis-cli\trellis.exe vm start
 - Keep WSL-specific code in `pkg/wsl/` — do not scatter Windows logic elsewhere
 - Run `go vet ./...` before committing
 
+## Fork Maintenance & Upstream Sync
+
+- **Upstream is the source of truth.** Keep all upstream capabilities working out of the box. WSL/Windows
+  behavior is added on top, gated behind an OS/WSL check (`runtime.GOOS == "windows"` / `WSL_DISTRO_NAME`).
+  When upstream absorbs a fork feature (e.g. `vm trust`), adopt upstream's implementation and only branch
+  for a genuinely Windows-specific need.
+- **Branch from a freshly-fetched `origin/master`.** Always `git fetch origin` and create the sync branch from
+  the *verified* `origin/master` tip (the fork's default branch + latest release tag) — NOT the local HEAD or a
+  feature branch. Branching one commit behind master silently drops master-only work and blocks the eventual PR
+  auto-merge (learned the hard way: a README-only #5 commit on master caused an unmergeable PR).
+- **Sync via merge, not rebase.** Merge `upstream/master` into a `qwatts/chore/upstream-sync-<version>` branch.
+  `upstream` remote = `roots/trellis-cli`; `origin` = `qwatts-dev/trellis-cli`.
+- **Watch for SILENT Windows regressions.** Upstream removed all Windows code in #683, so any upstream edit to
+  a shared file the fork left stock can silently re-strip Windows support with NO merge conflict. After every
+  merge, verify: `.goreleaser.yml` windows target, `app_paths` AppData/LocalAppData, `cmd/passthrough.go`
+  exec, `plugin/finder.go` `.exe` detection.
+- **Windows behavior in shared upstream files lives in Go build-constraint files**, never inline
+  `runtime.GOOS` branches: `<file>_windows.go` (auto-restricted by suffix) + `<file>_other.go`
+  (`//go:build !windows`, non-Windows default, usually a no-op). The shared file calls a small platform hook.
+  This keeps upstream files ~pristine and eliminates the silent-regression class. Existing examples:
+  `app_paths_windows.go`/`_other.go`, `cmd/passthrough_windows.go`/`_other.go`, `plugin/finder_windows.go`/`_other.go`.
+  (Pattern mirrors deps like `mattn/go-isatty` and the Go stdlib.) `.goreleaser.yml` can't build-split — keep
+  its `windows` goos target inline.
+- **Fork identity:** self-update points to `qwatts-dev/trellis-cli` via the `-X main.updaterRepo=` ldflag in
+  `.goreleaser.yml` and the release URL in `main.go`; the in-distro bootstrap fallback in `pkg/wsl/manager.go`
+  also curls the fork's `scripts/get`. The updater is a NOTIFIER only (no auto-install); releases must be full
+  GitHub Releases (not pre-releases) for `/releases/latest` to surface them.
+- **Release versioning:** `v<upstreamBase>-wsl2.N` (e.g. `v1.19.0-wsl2.1`), reset `.N` on each new upstream base.
+- **CI runs `modernize`:** before committing a merge, run
+  `go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -fix ./...` and commit any changes.
+
 ## Key Gotchas
+
 - **`/mnt/c/` = 777 permissions**: `.vault_pass` must be copied inside distro with `chmod 600`
 - **Do NOT use `fmask=0111` in wsl.conf**: Breaks VS Code WSL extension (`wslServer.sh: Permission denied`)
 - **rsync to DrvFS**: Use `-rlpt` not `-a` (chgrp fails). Use `--chmod=D755,F644` for Windows→WSL copies.
@@ -100,5 +136,6 @@ path\to\trellis-cli\trellis.exe vm start
 - **Node.js on WSL not host**: Unlike upstream Lima (Node on macOS host), WSL project files live on ext4 so Node/yarn must be inside the distro.
 
 ## Testing
+
 - **OS:** Windows 11 with WSL2 enabled
 - **Isolation:** If you have a global trellis-cli install, do NOT run the locally compiled binary from your PATH. Always invoke it by its full path to avoid conflicts.

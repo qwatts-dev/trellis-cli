@@ -16,7 +16,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6
@@ -30,6 +30,6 @@ jobs:
           args: release
         env:
           GITHUB_TOKEN: ${{ secrets.GORELEASER_GITHUB_ACCESS_TOKEN }}
-      - uses: actions/attest@v4
+      - uses: actions/attest@v4.2.0
         with:
           subject-checksums: ./dist/trellis_checksums.txt

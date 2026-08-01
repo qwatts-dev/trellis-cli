@@ -38,17 +38,18 @@ func NewWindowsHostsResolver(hosts []string) *WindowsHostsResolver {
 }
 
 func (h *WindowsHostsResolver) AddHosts(name string, ip string) error {
+	// Skip the write (and UAC prompt) if this project's exact entry is already
+	// present -- regardless of its position in the file. Comparing only this
+	// block (not the whole file) avoids a needless admin elevation when other
+	// trellis projects' blocks happen to sit after this one.
+	current, readErr := os.ReadFile(h.hostsPath)
+	if readErr == nil && bytes.Contains(current, h.hostsBlock(name, ip)) {
+		return nil
+	}
+
 	content, err := h.addHostsContent(name, ip)
 	if err != nil {
 		return fmt.Errorf("error updating hosts file: %v", err)
-	}
-
-	// Skip the write (and UAC prompt) if the hosts file already has
-	// the correct entries. This avoids an admin elevation on every
-	// `vm start` when the distro is just resuming.
-	current, err := os.ReadFile(h.hostsPath)
-	if err == nil && bytes.Equal(bytes.TrimRight(current, "\r\n\t "), bytes.TrimRight(content, "\r\n\t ")) {
-		return nil
 	}
 
 	return h.writeHostsFile(content)
@@ -68,16 +69,19 @@ func (h *WindowsHostsResolver) addHostsContent(name string, ip string) ([]byte, 
 		return nil, err
 	}
 
-	// Ensure blank line separation from existing hosts content,
-	// and add a human-readable comment so users know what this is.
-	entry := fmt.Sprintf(
-		"\n\n## trellis-start-%s\n# Added by trellis-cli (https://github.com/roots/trellis-cli)\n# To remove: trellis vm delete\n%s %s\n## trellis-end-%s\n",
-		name, ip, strings.Join(h.Hosts, " "), name)
-
-	// Trim leading newlines if the file already ends with whitespace.
+	// Ensure blank line separation from existing hosts content.
 	trimmed := bytes.TrimRight(content, "\r\n\t ")
-	content = append(trimmed, []byte(entry)...)
-	return content, nil
+	entry := append([]byte("\n\n"), h.hostsBlock(name, ip)...)
+	return append(trimmed, entry...), nil
+}
+
+// hostsBlock returns the marker-delimited block for a project's hosts entry.
+// The exact bytes are used both to write the entry and to detect an existing
+// identical one (so AddHosts can skip a needless UAC prompt).
+func (h *WindowsHostsResolver) hostsBlock(name string, ip string) []byte {
+	return []byte(fmt.Sprintf(
+		"## trellis-start-%s\n# Added by qwatts-dev/trellis-cli (https://github.com/qwatts-dev/trellis-cli)\n# To remove: trellis vm delete\n%s %s\n## trellis-end-%s\n",
+		name, ip, strings.Join(h.Hosts, " "), name))
 }
 
 func (h *WindowsHostsResolver) removeHostsContent(name string) ([]byte, error) {
