@@ -99,6 +99,10 @@ path\to\trellis-cli\trellis.exe vm start
   behavior is added on top, gated behind an OS/WSL check (`runtime.GOOS == "windows"` / `WSL_DISTRO_NAME`).
   When upstream absorbs a fork feature (e.g. `vm trust`), adopt upstream's implementation and only branch
   for a genuinely Windows-specific need.
+- **Branch from a freshly-fetched `origin/master`.** Always `git fetch origin` and create the sync branch from
+  the *verified* `origin/master` tip (the fork's default branch + latest release tag) — NOT the local HEAD or a
+  feature branch. Branching one commit behind master silently drops master-only work and blocks the eventual PR
+  auto-merge (learned the hard way: a README-only #5 commit on master caused an unmergeable PR).
 - **Sync via merge, not rebase.** Merge `upstream/master` into a `qwatts/chore/upstream-sync-<version>` branch.
   `upstream` remote = `roots/trellis-cli`; `origin` = `qwatts-dev/trellis-cli`.
 - **Watch for SILENT Windows regressions.** Upstream removed all Windows code in #683, so any upstream edit to
