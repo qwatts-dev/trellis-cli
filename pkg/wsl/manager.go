@@ -466,7 +466,7 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -896,39 +896,39 @@ chown admin:admin /home/admin/.ssh
 	// The copy goes through 9p (slow) but is a ONE-TIME cost during initial
 	// setup. After this, the developer works entirely within the WSL distro
 	// using VS Code's WSL extension.
-	bootstrapScript.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&bootstrapScript,
 		"echo 'Copying project files to WSL filesystem...'\nmkdir -p %s && rsync -rlpt --chmod=D755,F644 --info=progress2 %s/ %s/\n",
 		wslProjectDest, wslProjectRoot, wslProjectDest,
-	))
-	bootstrapScript.WriteString(fmt.Sprintf(
+	)
+	fmt.Fprintf(&bootstrapScript,
 		"chown -R admin:admin %s\n",
 		wslProjectDest,
-	))
+	)
 
 	// Write the Windows project root path inside the distro so that
 	// stopOtherDistros can SyncBack without needing the trellis project loaded.
-	bootstrapScript.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&bootstrapScript,
 		"echo '%s' > /etc/trellis-project-root\n",
 		projectRoot,
-	))
+	)
 
 	// Strip the execute bit from .vault_pass in the project copy.
 	// DrvFS metadata marks all files executable; Ansible interprets an
 	// executable .vault_pass as a script and tries to run it, which fails
 	// with "Exec format error" since it's a plain text file.
-	bootstrapScript.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&bootstrapScript,
 		"chmod 644 %s/trellis/.vault_pass 2>/dev/null || true\n",
 		wslProjectDest,
-	))
+	)
 
 	// Copy vault password file to a secure location inside the distro.
 	// Even though trellis/.vault_pass is now on ext4, Ansible may complain
 	// about permissions depending on the umask. The dedicated copy is safer.
 	bootstrapScript.WriteString("mkdir -p /home/admin/.trellis\n")
-	bootstrapScript.WriteString(fmt.Sprintf(
+	fmt.Fprintf(&bootstrapScript,
 		"cp %s/trellis/.vault_pass /home/admin/.trellis/.vault_pass\n",
 		wslProjectDest,
-	))
+	)
 	bootstrapScript.WriteString("chmod 600 /home/admin/.trellis/.vault_pass\n")
 	bootstrapScript.WriteString("chown -R admin:admin /home/admin/.trellis\n")
 
@@ -947,15 +947,15 @@ chown admin:admin /home/admin/.ssh
 	linuxBinary := filepath.Join(filepath.Dir(exePath), "trellis-linux")
 	if _, err := os.Stat(linuxBinary); err == nil {
 		wslLinuxBinary := toWslPath(linuxBinary)
-		bootstrapScript.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&bootstrapScript,
 			"cp %s /usr/local/bin/trellis && chmod 755 /usr/local/bin/trellis\n",
 			wslLinuxBinary,
-		))
+		)
 	} else if HostVersion != "canary" {
-		bootstrapScript.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&bootstrapScript,
 			"curl -fsSL %s | tar xz -C /usr/local/bin trellis && chmod 755 /usr/local/bin/trellis\n",
 			releaseAssetURL(HostVersion),
-		))
+		)
 	} else {
 		bootstrapScript.WriteString("curl -sL https://raw.githubusercontent.com/qwatts-dev/trellis-cli/master/scripts/get | bash -s\n")
 	}
@@ -968,19 +968,19 @@ chown admin:admin /home/admin/.ssh
 		// Resolve relative path: trellis/../site → site
 		siteDirName := filepath.Base(filepath.Join("trellis", siteRelPath))
 
-		bootstrapScript.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&bootstrapScript,
 			"mkdir -p /srv/www/%s/current\n",
 			siteName,
-		))
-		bootstrapScript.WriteString(fmt.Sprintf(
+		)
+		fmt.Fprintf(&bootstrapScript,
 			"mount --bind %s/%s /srv/www/%s/current\n",
 			wslProjectDest, siteDirName, siteName,
-		))
+		)
 		// Add fstab entry so the bind mount survives WSL restarts.
-		bootstrapScript.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&bootstrapScript,
 			"grep -q '/srv/www/%s/current' /etc/fstab || echo '%s/%s /srv/www/%s/current none bind,nofail 0 0' >> /etc/fstab\n",
 			siteName, wslProjectDest, siteDirName, siteName,
-		))
+		)
 	}
 
 	err := command.WithOptions(
