@@ -80,7 +80,7 @@ func DownloadRelease(repo string, version string, path string, dest string) (rel
 		_ = archiveFile.Close()
 	}
 
-	org := strings.Split(repo, "/")[0]
+	org, _, _ := strings.Cut(repo, "/")
 	dirs, _ := filepath.Glob(fmt.Sprintf("%s-*", org))
 
 	if len(dirs) == 0 {

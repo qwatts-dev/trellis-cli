@@ -333,6 +333,36 @@ func (m *Manager) RunCommandPipe(args []string, dir string) (*exec.Cmd, error) {
 	return command.Cmd("wsl", wslArgs), nil
 }
 
+// ReadRootFile reads a root-owned file from inside the distro. Implements
+// vm.Manager for the `vm trust` cert-extraction flow.
+func (m *Manager) ReadRootFile(remotePath string) ([]byte, error) {
+	instanceName, err := m.trellis.GetVmInstanceName()
+	if err != nil {
+		return nil, err
+	}
+
+	distro := distroName(instanceName)
+	if !m.distroExists(distro) {
+		return nil, fmt.Errorf("WSL distro does not exist. Run `trellis vm start` to create it.")
+	}
+
+	// Ensure the distro is running (WSL2 may auto-shutdown idle distros).
+	_ = command.Cmd("wsl", []string{"-d", distro, "--", "/bin/true"}).Run()
+
+	return command.Cmd("wsl", []string{"-d", distro, "-u", "root", "--", "cat", remotePath}).Output()
+}
+
+// Copy writes a file from inside the distro to a path on the Windows host.
+// Implements vm.Manager.
+func (m *Manager) Copy(srcInVm string, dstOnHost string) error {
+	data, err := m.ReadRootFile(srcInVm)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(dstOnHost, data, 0644)
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -348,7 +378,7 @@ func (m *Manager) distroExists(distro string) bool {
 	// wsl.exe outputs UTF-16LE on Windows — decode before parsing.
 	decoded := DecodeWslOutput(output)
 
-	for _, line := range strings.Split(decoded, "\n") {
+	for line := range strings.SplitSeq(decoded, "\n") {
 		if strings.TrimSpace(line) == distro {
 			return true
 		}
@@ -366,7 +396,7 @@ func (m *Manager) distroRunning(distro string) bool {
 
 	decoded := DecodeWslOutput(output)
 
-	for _, line := range strings.Split(decoded, "\n") {
+	for line := range strings.SplitSeq(decoded, "\n") {
 		if strings.TrimSpace(line) == distro {
 			return true
 		}
@@ -386,7 +416,7 @@ func (m *Manager) stopOtherDistros(current string) {
 
 	decoded := DecodeWslOutput(output)
 
-	for _, line := range strings.Split(decoded, "\n") {
+	for line := range strings.SplitSeq(decoded, "\n") {
 		name := strings.TrimSpace(line)
 		if name == "" || name == current {
 			continue
@@ -684,7 +714,8 @@ func (m *Manager) BootstrapInstance(name string) error {
 	// ext4 copy hasn't happened yet at this point in the script.
 	wslTrellisSrc := wslProjectRoot + "/trellis"
 
-	bootstrapScript := `set -e
+	var bootstrapScript strings.Builder
+	bootstrapScript.WriteString(`set -e
 export DEBIAN_FRONTEND=noninteractive
 
 # Prevent openssh-server's ssh.socket from starting during install.
@@ -742,7 +773,7 @@ WSLCONF
 mkdir -p /home/admin/.ssh
 chmod 700 /home/admin/.ssh
 chown admin:admin /home/admin/.ssh
-`
+`)
 
 	// Copy the ENTIRE project (trellis/ + site/ + .git/) from Windows into
 	// WSL's native ext4 filesystem. This is the critical step that gives us:
@@ -753,41 +784,41 @@ chown admin:admin /home/admin/.ssh
 	// The copy goes through 9p (slow) but is a ONE-TIME cost during initial
 	// setup. After this, the developer works entirely within the WSL distro
 	// using VS Code's WSL extension.
-	bootstrapScript += fmt.Sprintf(
+	bootstrapScript.WriteString(fmt.Sprintf(
 		"echo 'Copying project files to WSL filesystem...'\nmkdir -p %s && rsync -rlpt --chmod=D755,F644 --info=progress2 %s/ %s/\n",
 		wslProjectDest, wslProjectRoot, wslProjectDest,
-	)
-	bootstrapScript += fmt.Sprintf(
+	))
+	bootstrapScript.WriteString(fmt.Sprintf(
 		"chown -R admin:admin %s\n",
 		wslProjectDest,
-	)
+	))
 
 	// Write the Windows project root path inside the distro so that
 	// stopOtherDistros can SyncBack without needing the trellis project loaded.
-	bootstrapScript += fmt.Sprintf(
+	bootstrapScript.WriteString(fmt.Sprintf(
 		"echo '%s' > /etc/trellis-project-root\n",
 		projectRoot,
-	)
+	))
 
 	// Strip the execute bit from .vault_pass in the project copy.
 	// DrvFS metadata marks all files executable; Ansible interprets an
 	// executable .vault_pass as a script and tries to run it, which fails
 	// with "Exec format error" since it's a plain text file.
-	bootstrapScript += fmt.Sprintf(
+	bootstrapScript.WriteString(fmt.Sprintf(
 		"chmod 644 %s/trellis/.vault_pass 2>/dev/null || true\n",
 		wslProjectDest,
-	)
+	))
 
 	// Copy vault password file to a secure location inside the distro.
 	// Even though trellis/.vault_pass is now on ext4, Ansible may complain
 	// about permissions depending on the umask. The dedicated copy is safer.
-	bootstrapScript += "mkdir -p /home/admin/.trellis\n"
-	bootstrapScript += fmt.Sprintf(
+	bootstrapScript.WriteString("mkdir -p /home/admin/.trellis\n")
+	bootstrapScript.WriteString(fmt.Sprintf(
 		"cp %s/trellis/.vault_pass /home/admin/.trellis/.vault_pass\n",
 		wslProjectDest,
-	)
-	bootstrapScript += "chmod 600 /home/admin/.trellis/.vault_pass\n"
-	bootstrapScript += "chown -R admin:admin /home/admin/.trellis\n"
+	))
+	bootstrapScript.WriteString("chmod 600 /home/admin/.trellis/.vault_pass\n")
+	bootstrapScript.WriteString("chown -R admin:admin /home/admin/.trellis\n")
 
 	// Install the trellis CLI binary inside the distro so developers can
 	// run `trellis provision development`, `trellis db open`, etc. from
@@ -804,12 +835,12 @@ chown admin:admin /home/admin/.ssh
 	linuxBinary := filepath.Join(filepath.Dir(exePath), "trellis-linux")
 	if _, err := os.Stat(linuxBinary); err == nil {
 		wslLinuxBinary := toWslPath(linuxBinary)
-		bootstrapScript += fmt.Sprintf(
+		bootstrapScript.WriteString(fmt.Sprintf(
 			"cp %s /usr/local/bin/trellis && chmod 755 /usr/local/bin/trellis\n",
 			wslLinuxBinary,
-		)
+		))
 	} else {
-		bootstrapScript += "curl -sL https://raw.githubusercontent.com/roots/trellis-cli/master/scripts/get | bash -s\n"
+		bootstrapScript.WriteString("curl -sL https://raw.githubusercontent.com/qwatts-dev/trellis-cli/master/scripts/get | bash -s\n")
 	}
 
 	// Bind-mount each site's directory from the ext4 project copy to the
@@ -820,24 +851,24 @@ chown admin:admin /home/admin/.ssh
 		// Resolve relative path: trellis/../site → site
 		siteDirName := filepath.Base(filepath.Join("trellis", siteRelPath))
 
-		bootstrapScript += fmt.Sprintf(
+		bootstrapScript.WriteString(fmt.Sprintf(
 			"mkdir -p /srv/www/%s/current\n",
 			siteName,
-		)
-		bootstrapScript += fmt.Sprintf(
+		))
+		bootstrapScript.WriteString(fmt.Sprintf(
 			"mount --bind %s/%s /srv/www/%s/current\n",
 			wslProjectDest, siteDirName, siteName,
-		)
+		))
 		// Add fstab entry so the bind mount survives WSL restarts.
-		bootstrapScript += fmt.Sprintf(
+		bootstrapScript.WriteString(fmt.Sprintf(
 			"grep -q '/srv/www/%s/current' /etc/fstab || echo '%s/%s /srv/www/%s/current none bind,nofail 0 0' >> /etc/fstab\n",
 			siteName, wslProjectDest, siteDirName, siteName,
-		)
+		))
 	}
 
 	err := command.WithOptions(
 		command.WithTermOutput(),
-	).Cmd("wsl", []string{"-d", distro, "--", "bash", "-c", bootstrapScript}).Run()
+	).Cmd("wsl", []string{"-d", distro, "--", "bash", "-c", bootstrapScript.String()}).Run()
 
 	if err != nil {
 		return fmt.Errorf("could not bootstrap WSL distro: %v", err)

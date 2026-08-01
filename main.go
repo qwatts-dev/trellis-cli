@@ -206,11 +206,17 @@ func main() {
 		"vm sync": func() (cli.Command, error) {
 			return cmd.NewVmSyncCommand(ui, trellis), nil
 		},
+		"vm sudoers": func() (cli.Command, error) {
+			return &cmd.VmSudoersCommand{UI: ui, Trellis: trellis}, nil
+		},
 		"vm trust": func() (cli.Command, error) {
 			return cmd.NewVmTrustCommand(ui, trellis), nil
 		},
-		"vm sudoers": func() (cli.Command, error) {
-			return &cmd.VmSudoersCommand{UI: ui, Trellis: trellis}, nil
+		"vm trust paths": func() (cli.Command, error) {
+			return cmd.NewVmTrustPathsCommand(ui, trellis), nil
+		},
+		"vm untrust": func() (cli.Command, error) {
+			return cmd.NewVmUntrustCommand(ui, trellis), nil
 		},
 		"xdebug-tunnel": func() (cli.Command, error) {
 			return &cmd.NamespaceCommand{
@@ -238,7 +244,7 @@ func main() {
 		ui.Info(c.Version)
 
 		if c.Version != "canary" {
-			ui.Info(fmt.Sprintf("https://github.com/roots/trellis-cli/releases/tag/v%s", c.Version))
+			ui.Info(fmt.Sprintf("https://github.com/qwatts-dev/trellis-cli/releases/tag/v%s", c.Version))
 		}
 
 		os.Exit(0)

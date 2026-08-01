@@ -76,7 +76,7 @@ func (c *VmOpenCommand) Run(args []string) int {
 	if output, err := command.Cmd("wsl", []string{"-l", "--running", "-q"}).Output(); err == nil {
 		running := false
 		decoded := wsl.DecodeWslOutput(output)
-		for _, line := range strings.Split(decoded, "\n") {
+		for line := range strings.SplitSeq(decoded, "\n") {
 			if strings.TrimSpace(line) == distro {
 				running = true
 				break
