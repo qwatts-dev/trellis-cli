@@ -881,6 +881,16 @@ default=admin
 options = "metadata,umask=0022"
 WSLCONF
 
+# Disable systemd rate limiting for PHP-FPM to prevent installation failures.
+# When multiple PHP extensions are installed, each triggers a php-fpm restart.
+# Without this, systemd's default rate limit (5 starts per 10s) causes failures
+# with "Start request repeated too quickly" during first provision.
+mkdir -p /etc/systemd/system/php8.3-fpm.service.d
+cat > /etc/systemd/system/php8.3-fpm.service.d/override.conf << 'SYSTEMD_OVERRIDE'
+[Unit]
+StartLimitIntervalSec=0
+SYSTEMD_OVERRIDE
+
 # Create .ssh directory for admin user (needed by Ansible known_hosts module).
 mkdir -p /home/admin/.ssh
 chmod 700 /home/admin/.ssh
