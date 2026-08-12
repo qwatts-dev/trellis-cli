@@ -66,6 +66,35 @@ Restart your terminal afterward, then run `trellis --version`.
 
 > **What about `trellis-linux`?** You don't need to download it. The cross-compiled Linux binary is fetched from the matching release and deployed into each WSL distro automatically during `vm start`. (Only local dev builds use a side-by-side `trellis-linux` sidecar.)
 
+### Migrating from an earlier manual install
+
+If you previously installed this fork the manual way (downloading `trellis.exe`
+and `trellis-linux` into a folder like `C:\trellis-wsl\` and adding it to PATH),
+switch to Scoop like this:
+
+1. Install via Scoop (see above).
+
+2. Remove your old install folder from PATH so Scoop's copy takes precedence —
+   Windows runs whichever `trellis.exe` comes first in PATH. Substitute your
+   folder if it wasn't `C:\trellis-wsl`:
+
+   ```powershell
+   $old = "C:\trellis-wsl"
+   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+   [Environment]::SetEnvironmentVariable("Path", ($userPath -split ";" | Where-Object { $_ -and $_.TrimEnd('\') -ne $old }) -join ";", "User")
+   Remove-Item -Recurse -Force $old   # optional: delete the old files
+   ```
+
+3. Restart your terminal and confirm Scoop's binary is the one that runs:
+
+   ```powershell
+   where.exe trellis     # should list only your scoop\shims path
+   trellis --version     # should show the current release, not "canary"
+   ```
+
+Your existing WSL distros are unaffected — each syncs to the new release version
+automatically on the next `trellis vm start`.
+
 ### Updating
 
 - **Scoop:** `scoop update trellis`
