@@ -118,16 +118,18 @@ For a script/manual install:
    trellis vm delete    # run from each project directory
    ```
 
-2. Delete the install folder (default script location shown; adjust if you chose another):
+2. Set `$installDir` to wherever you installed — `$env:LOCALAPPDATA\Programs\trellis`
+   for the script installer, or `C:\trellis-wsl` (or your chosen folder) for a
+   manual install — then delete it:
    ```powershell
-   Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\trellis"
+   $installDir = "$env:LOCALAPPDATA\Programs\trellis"   # or: "C:\trellis-wsl"
+   Remove-Item -Recurse -Force $installDir
    ```
 
-3. Remove it from your PATH:
+3. Remove that same folder from your PATH:
    ```powershell
    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-   $installDir = "$env:LOCALAPPDATA\Programs\trellis"
-   [Environment]::SetEnvironmentVariable("Path", ($userPath -split ";" | Where-Object { $_ -ne $installDir }) -join ";", "User")
+   [Environment]::SetEnvironmentVariable("Path", ($userPath -split ";" | Where-Object { $_ -and $_.TrimEnd('\') -ne $installDir.TrimEnd('\') }) -join ";", "User")
    ```
 
 4. Restart your terminal.
