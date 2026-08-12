@@ -37,8 +37,19 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+# The fork's `-wsl2.N` suffix is a semver prerelease segment, so goreleaser's
+# default (prerelease: auto) would flag every release as a pre-release and hide
+# it from /releases/latest (which Scoop, install.ps1, and the update notifier
+# all read). Force full releases instead.
+release:
+  prerelease: false
+# Upstream publishes a Homebrew formula to roots/homebrew-tap. This is the
+# Windows/WSL2 fork, so we keep the block for upstream-merge parity but never
+# publish it (fork releases can't push to Roots' tap, and this build is
+# Windows-only anyway). Windows distribution is handled by `scoops` below.
 brews:
   - name: trellis-cli
+    skip_upload: true
     repository:
       owner: roots
       name: homebrew-tap
@@ -50,3 +61,18 @@ brews:
     test: |
       system "#{bin}/trellis --autocomplete-install"
       system "#{bin}/trellis -v"
+# Windows install pathway — the Scoop analog of upstream's Homebrew tap.
+# goreleaser regenerates this manifest (version + hashes) on every release and
+# commits it to the qwatts-dev/scoop-bucket repo, so `scoop update trellis`
+# mirrors `brew upgrade`. Ships trellis.exe only; trellis-linux is fetched into
+# each distro at runtime during `vm start`.
+scoops:
+  - name: trellis
+    repository:
+      owner: qwatts-dev
+      name: scoop-bucket
+      branch: main
+    directory: bucket
+    homepage: https://github.com/qwatts-dev/trellis-cli
+    description: A CLI to manage Trellis projects (Windows/WSL2 fork)
+    license: MIT

@@ -17,9 +17,36 @@ This work was [proposed upstream](https://github.com/roots/trellis-cli/pull/667)
 
 ## Install
 
-1. Download `trellis.exe` and `trellis-linux` from the [latest release](https://github.com/qwatts-dev/trellis-cli/releases/latest).
+The fastest way to install is with [Scoop](https://scoop.sh) — the Windows analog of Homebrew:
 
-2. Place both files in a folder, e.g., `C:\trellis-wsl\`.
+```powershell
+scoop bucket add trellis https://github.com/qwatts-dev/scoop-bucket
+scoop install trellis
+```
+
+Then confirm:
+
+```powershell
+trellis --version
+```
+
+### Install via script (no Scoop)
+
+If you don't use Scoop, run the PowerShell installer. It downloads the latest
+`trellis.exe`, verifies its checksum, installs it to a per-user folder, and adds
+that folder to your PATH (no admin required):
+
+```powershell
+irm https://raw.githubusercontent.com/qwatts-dev/trellis-cli/master/scripts/install.ps1 | iex
+```
+
+Restart your terminal afterward, then run `trellis --version`.
+
+### Manual install
+
+1. Download `trellis.exe` from the [latest release](https://github.com/qwatts-dev/trellis-cli/releases/latest).
+
+2. Place it in a folder, e.g., `C:\trellis-wsl\`.
 
 3. Add that folder to your Windows PATH so you can run `trellis` from any terminal:
 
@@ -37,30 +64,41 @@ This work was [proposed upstream](https://github.com/roots/trellis-cli/pull/667)
 
 > **Already have the official trellis-cli installed?** If you installed the upstream version via Scoop, Homebrew, or another method, either uninstall it first or invoke this fork by its full path (e.g., `C:\trellis-wsl\trellis.exe vm start`) to avoid conflicts. Windows uses whichever `trellis.exe` appears first in PATH.
 
-Both files are required:
-- **`trellis.exe`** — runs on Windows, manages WSL distros
-- **`trellis-linux`** — cross-compiled Linux binary, automatically deployed into each WSL distro during bootstrap
+> **What about `trellis-linux`?** You don't need to download it. The cross-compiled Linux binary is fetched from the matching release and deployed into each WSL distro automatically during `vm start`. (Only local dev builds use a side-by-side `trellis-linux` sidecar.)
 
 ### Updating
 
-Download the latest `trellis.exe` and `trellis-linux` from [releases](https://github.com/qwatts-dev/trellis-cli/releases/latest) and replace the files in your install folder (e.g., `C:\trellis-wsl\`). Existing WSL distros will pick up the new Linux binary on next `vm start`.
+- **Scoop:** `scoop update trellis`
+- **Script/manual:** re-run the installer above, or download the latest `trellis.exe` and replace it in your install folder.
+
+Existing WSL distros pick up the matching Linux binary on next `vm start`.
 
 ### Uninstalling
+
+If you installed with Scoop:
+
+```powershell
+trellis vm delete   # run from each project directory to remove its distro (optional)
+scoop uninstall trellis
+```
+
+For a script/manual install:
 
 1. Delete your WSL distros first (if desired):
    ```powershell
    trellis vm delete    # run from each project directory
    ```
 
-2. Delete the install folder:
+2. Delete the install folder (default script location shown; adjust if you chose another):
    ```powershell
-   Remove-Item -Recurse -Force C:\trellis-wsl
+   Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\trellis"
    ```
 
 3. Remove it from your PATH:
    ```powershell
    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-   [Environment]::SetEnvironmentVariable("Path", ($userPath -split ";" | Where-Object { $_ -ne "C:\trellis-wsl" }) -join ";", "User")
+   $installDir = "$env:LOCALAPPDATA\Programs\trellis"
+   [Environment]::SetEnvironmentVariable("Path", ($userPath -split ";" | Where-Object { $_ -ne $installDir }) -join ";", "User")
    ```
 
 4. Restart your terminal.
